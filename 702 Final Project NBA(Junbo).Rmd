@@ -1,0 +1,1113 @@
+---
+title: "IDS702 Final Project: NBA Salary Analysis"
+author: "Junbo Guan"
+
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+
+
+library(ggplot2)
+library(rms) 
+library(MASS)
+library(knitr)
+library(tidyr)
+library(Metrics)
+library(dplyr)
+library(lme4)
+library(arm)
+library(pROC)
+library(e1071)
+library(caret)
+library(tidyverse)
+require(gridExtra)
+library(broom)
+library(sjPlot)
+library(readxl)
+
+
+
+
+```
+
+## Summary:
+
+The project explores how to use various NBA statistics to predict the share of NBA players' salary cap (the total amount a team can spend on players in a given season) from 1995 to 2017. The project's goal was to find out which statistics are the best predictors of NBA players' salaries. 2. Interpret how three-point ability influence the salaries. In the project, I create two linear regression models, one for the regular statistics and one for the advanced statistics, and compare the two models. I also fit a multilevel linear regression model setting the seasons as the group variable. The conclusions are 1. the basic statistics predict NBA players' salaries better than the advanced statistics. 2. From 1995 to 2017, three-point shooters are getting a higher share of total salary caps.
+
+
+
+## Introduction
+With the increasing influence of the NBA worldwide within the past decades, NBA players are getting incredibly high salaries. My project will reveal what kind of players tend to get high salaries from 1995 to 2017. The dataset used is from Kaggle, containing aggregate individual statistics for past NBA seasons. In this report, I want to quantify the effect of different statistics on NBA players' salaries and determine a likely range for the effect of them. With the sudden rise and success of Stephen Curry and his Golden Warriors, NBA players tend to shoot 3 points more than ever. I want to explore how a three-point shooter get paid during the past decades. I do exploratory data analysis to understand the relationship between different predictors and the response variable salary, fitted a multilevel linear regression model with appropriate features, and interpreted the results.
+
+## Data
+
+#### Data Processing
+
+The original dataset contains aggregate individual statistics for 67 NBA seasons. Great changes have taken place in NBA during the 1980s, so I decided to use data after 1995, because in this year, two new teams were added, bringing the team total to 29 (the 30th team, the Charlotte Bobcats, was added in 2004). 
+Since the salary cap differs each year, NBA players' salaries inflate a lot. So I include the salary caps for each year in my dataset. Instead of directly analyze salaries, I explore the percentage of the league's salary cap to normalize the data.
+Some of the teams moved or changed their name during the time period. For example, Seatle SuperSonics moved to Oklahoma City and changed its name to thunders in the 2008-2009 season. So I merged such kind of data.
+For players who were traded during the season, I only take the team's statistics he played more games in so that such players will be counted only once. I removed the players who only played less than 15 games for that season. I also transfer all the regular data on a per-game basis instead of totals to eliminate the effect of games played.
+Since the data set only has less than 2% observations with missing data, I discard such observations. 
+I create a new factor variable 3 point shooter for those players who have three-point shooting percentages, and three-point shooting attempts greater than the league's median. I classifier him as a three-point shooter, and all the other players are not. 
+I then divided the statistics into two subcategories: Regular and Advanced. Regular statistics include statistics that casual fans can understand: points per game, rebounds per game, percentage of field goals scored, and so on. Advanced statistics were created to assess player performance in more detail, PER (player efficiency level), victory share (share of the number of wins a player contributes to his team), usage rate (percentage of team games the player uses in the field)...
+
+
+
+```{r, echo=FALSE, include=FALSE}
+
+nba <- read.csv('/Users/guanlxy/Desktop/NBASalary/nbasalary.csv')
+
+dim(nba)
+head(nba)
+summary(nba)
+str(nba)
+
+
+```
+
+
+
+
+```{r, echo=FALSE, fig.width=4, fig.height=2.5}
+nba$Pos <- as.factor(nba$Pos)
+nba$Salary <- as.numeric(nba$Salary)
+nba$logsalary = log(nba$Salary)
+nba$logcap = log(nba$X..of.Cap)
+nba$Team <- as.factor(nba$Team)
+
+# hist(nba$Salary)
+# hist(nba$logsalary)
+hist(nba$X..of.Cap)
+hist(nba$logcap)
+```
+
+#### EDA
+Before starting the analysis, the predictors "three-point shooter", "position," and "team" are considered as factor variables. I plot the histogram for the response variable; the salary cap percentage does not follow the normal distribution. The log percentage of cap, however, follows the normal distribution. Thus, I use the log percentage of the cap(logcap) for the coming analysis. 
+
+##### Relationship between predictors and the response variable
+
+Next, explore the relationship between salary and each predictor. I use boxplots for categorical predictors. I use scatter plots for continuous/numeric predictors. We can find out the log cap is almost the same in each season. For the predictor, I add a quadratic term. Nba players' salaries increase before the age of 29 and decrease after age 30. I will use log(WS) for win share since the log(WS) has a linear relationship with the log cap. Generally speaking, a three-point shooter gets paid more than a non-three three point shooters. The salary difference between teams is not that much, but several teams would offer higher salaries to players than other teams: Detroit Pistons, Cleveland Cavaliers, Golden State Warriors, and New York Knicks. Generally, Eastern conference teams are more generous. It's interesting because western conference teams won 14 championships from 1995 to 2017 while eastern conference teams only won 9 championships. During the period, the most successful dynasty teams: the Los Angeles Lakers and San Antonio Spurs do not pay players higher than other teams.
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+ggplot(nba,aes(x=Season, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Season",x="Season",y="Salary")
+
+
+ggplot(nba,aes(x=Season, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Logcap vs Season",x="Season",y="logcap")
+
+ggplot(nba,aes(x=Team, y=X..of.Cap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Season",x="Season",y="Salary")
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+ggplot(nba,aes(x=Age, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Age",x="Age",y="Salary")
+
+
+ggplot(nba,aes(x=Age, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logcap vs Age",x="Age",y="logcap")
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+ggplot(nba,aes(x=PER, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs PER",x="PER",y="Salary")
+
+
+ggplot(nba,aes(x=PER, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs PER",x="PER",y="Salary")
+
+ggplot(nba,aes(x=PER, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="locap vs PER",x="PER",y="logcap")
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+ggplot(nba,aes(x=WS, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Win Share",x="Win Share",y="Salary")
+
+
+ggplot(nba,aes(x=OWS, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Off Win Share",x="Off Win Share",y="Salary")
+
+
+ggplot(nba,aes(x=DWS, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs Def Win Share",x="Def Win Share",y="Salary")
+
+ggplot(nba,aes(x=log(WS), y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logSalary vs Win Share",x="log Win Share",y="logSalary")
+
+
+ggplot(nba,aes(x=log(OWS), y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logSalary vs Off Win Share",x="log Off Win Share",y="logSalary")
+
+
+ggplot(nba,aes(x=log(DWS), y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logSalary vs Def Win Share",x="log Def Win Share",y="logSalary")
+
+
+
+
+
+ggplot(nba,aes(x=WS, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logcap vs Win Share",x="Win Share",y="logcap")
+
+
+ggplot(nba,aes(x=OWS, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logcap vs Off Win Share",x="Off Win Share",y="logcap")
+
+
+ggplot(nba,aes(x=DWS, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logcap vs Def Win Share",x="Def Win Share",y="logcap")
+
+
+ggplot(nba,aes(x=log(WS), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logcap vs Win Share",x="log Win Share",y="logSalary")
+
+
+ggplot(nba,aes(x=log(OWS), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logSalary vs Off Win Share",x="log Off Win Share",y="logSalary")
+
+
+ggplot(nba,aes(x=log(DWS), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logSalary vs Def Win Share",x="log Def Win Share",y="logSalary")
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+ggplot(nba,aes(x=PPG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs PPG",x="PPG",y="Salary")
+
+ggplot(nba,aes(x=APG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs APG",x="APG",y="Salary")
+
+
+ggplot(nba,aes(x=RPG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs RPG",x="RPG",y="Salary")
+
+
+
+ggplot(nba,aes(x=SPG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs SPG",x="SPG",y="Salary")
+
+
+ggplot(nba,aes(x=BPG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs BPG",x="BPG",y="Salary")
+
+ggplot(nba,aes(x=TPG, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs TPG",x="TPG",y="Salary")
+
+
+
+
+
+ggplot(nba,aes(x=log(PPG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs PPG",x="PPG",y="Salary")
+
+ggplot(nba,aes(x=log(APG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs APG",x="APG",y="Salary")
+
+
+ggplot(nba,aes(x=log(RPG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs RPG",x="RPG",y="Salary")
+
+
+
+ggplot(nba,aes(x=log(SPG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs SPG",x="SPG",y="Salary")
+
+
+ggplot(nba,aes(x=log(BPG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs BPG",x="BPG",y="Salary")
+
+ggplot(nba,aes(x=log(TPG), y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs TPG",x="TPG",y="Salary")
+
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+ggplot(nba,aes(x=PPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs PPG",x="PPG",y="Salary")
+
+ggplot(nba,aes(x=APG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs APG",x="APG",y="log Salary")
+
+
+ggplot(nba,aes(x=RPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs RPG",x="RPG",y="log Salary")
+
+
+ggplot(nba,aes(x=SPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs SPG",x="SPG",y="log Salary")
+
+
+ggplot(nba,aes(x=BPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logsalary vs BPG",x="BPG",y="log Salary")
+
+ggplot(nba,aes(x=TPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs TPG",x="TPG",y="logs Salary")
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+ggplot(nba,aes(x=GP, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs SPG",x="SPG",y="log Salary")
+
+
+ggplot(nba,aes(x=BPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="logsalary vs BPG",x="BPG",y="log Salary")
+
+ggplot(nba,aes(x=TPG, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="log Salary vs TPG",x="TPG",y="logs Salary")
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+nba$X3P1 <- nba$X3P.
+nba$X3P2 <- nba$X3PAPG
+
+nba$X3P1[nba$X3P. < median(nba$X3P.)] = 0
+nba$X3P1[nba$X3P. >= median(nba$X3P.)] = 1
+
+nba$X3P2[nba$X3PAPG < median(nba$X3PAPG)] = 0
+nba$X3P2[nba$X3PAPG >= median(nba$X3PAPG)] = 1
+
+nba$X3PLevel = as.factor(nba$X3P1*nba$X3P2)
+
+nba$PERLevel[nba$PER < 15] = 0
+nba$PERLevel[nba$PER >= 15] = 1
+nba$PERLevel = as.factor(nba$PERLevel)
+
+nba$WSLevel[nba$WS < median(nba$WS)] = 0
+nba$WSLevel[nba$WS >= median(nba$WS)] = 1
+nba$WSLevel = as.factor(nba$WSLevel)
+
+```
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+ggplot(nba,aes(x=Pos, y=logcap, fill=Pos)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=WSLevel, y=logcap, fill=WSLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=PERLevel, y=logcap, fill=PERLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=X3PLevel, y=logcap, fill=X3PLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS 3Points",x="3Point Shooter",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+
+
+
+ggplot(nba,aes(x=Pos, y=logcap, fill=Pos)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=WSLevel, y=logcap, fill=WSLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=PERLevel, y=logcap, fill=PERLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS Position",x="Position",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+ggplot(nba,aes(x=X3PLevel, y=logcap, fill=X3PLevel)) +
+  geom_boxplot() + #coord_flip() +
+  scale_fill_brewer(palette="Blues") +
+  labs(title="Salary VS 3Points",x="3Point Shooter",y="Salary") + 
+  theme_classic() + theme(legend.position="none")
+```
+
+```{r,echo=FALSE, fig.height=2.5, fig.width=9}
+ggplot(nba,aes(x=Team, y=logcap, fill=Team)) +
+  geom_boxplot() + #coord_flip() +
+  # scale_fill_brewer(palette="Blues") +
+  labs(title="log Salary VS Team",x="Team",y="log Salary") + 
+  theme_classic() + theme(legend.position="none")
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+ggplot(nba,aes(x=Pos, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs position by Year",x="Position",y="log salary") +
+  facet_wrap( ~ Season,ncol=4)
+
+
+ggplot(nba,aes(x=Pos, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs position by Year",x="Position",y="Salary") +
+  facet_wrap( ~ Season,ncol=4)
+```
+
+
+##### Interactions between predictors
+For the interaction terms between a factor variable and a continuous variable, I draw a set of boxplots to explore potential interaction. The interaction between 3 point shooter and position is interesting. The salary only goes high slightly for the three-point shooter for guards and forwards compared to the non-three-point shooter. However, for the centers, three-point shooters' salary is significantly higher than the non-three point shooters. It is important, especially for big men, to shoot and create space. 
+As for the interaction between three-point shooting and season, the plot barely shows any difference before 2006. After 2006, it is clear that three-point shooters are getting paid relatively higher each year. 
+The salaries of players in different positions vary as the NBA evolves. In the late 1990s and early 2000s, the power forwards and the center gets relatively higher salaries. That is the golden years for the big man. Then in the mid-2000s, The NBA league decided to modify the rules to encourage offense for the sake of ratings. The guards get paid higher than other positions. From the 2010s, forwards get paid more than other positions.
+
+```{r,include=FALSE}
+
+ggplot(nba,aes(x=Pos, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log cap vs position by Season",x="Position",y="logcap") +
+  facet_wrap( ~ Season,ncol=4)
+
+```
+
+```{r, echo=FALSE, fig.width=9, fig.height=4}
+# par(mfrow=c(1,2))
+
+
+
+plot1 <- ggplot(nba,aes(x=X3PLevel, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Season",x="3Point Shooting",y="log salary") +
+  facet_wrap( ~ Season,ncol=5)
+
+
+plot2 <- ggplot(nba,aes(x=X3PLevel, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3Point Shooting",y="log salary") +
+  facet_wrap( ~ Pos,ncol=5)
+
+grid.arrange(plot1, plot2, ncol=2)
+```
+
+
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+ggplot(nba,aes(x=X3PLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Pos,ncol=4)
+
+
+ggplot(nba,aes(x=X3PLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Season,ncol=4)
+
+ggplot(nba,aes(x=X3PLevel, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs 3 Point Shooter by Position",x="3 Point Shooter",y="salary") +
+  facet_wrap( ~ Pos,ncol=4)
+
+
+ggplot(nba,aes(x=X3PLevel, y=Salary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Salary vs 3P by Position",x="3P",y="salary") +
+  facet_wrap( ~ Season,ncol=4)
+
+
+ggplot(nba,aes(x=X3PLevel, y=logcap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Pos,ncol=4)
+
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+ggplot(nba,aes(x=WSLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Season,ncol=4)
+
+
+ggplot(nba,aes(x=PERLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Season,ncol=4)
+
+ggplot(nba,aes(x=X3PLevel, y=X..of.Cap)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Team,ncol=4)
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+ggplot(nba,aes(x=WSLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ PERLevel,ncol=4)
+
+
+
+ggplot(nba,aes(x=WSLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ X3PLevel,ncol=4)
+
+
+ggplot(nba,aes(x=PERLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ X3PLevel,ncol=4)
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+ggplot(nba,aes(x=WSLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Pos,ncol=4)
+
+
+ggplot(nba,aes(x=PERLevel, y=logsalary)) +
+  geom_point(alpha = .5,colour="blue4") +
+  geom_smooth(method="lm",col="red3") + theme_classic() +
+  labs(title="Log Salary vs 3P by Position",x="3P",y="log salary") +
+  facet_wrap( ~ Pos,ncol=4)
+
+
+
+
+```
+
+
+
+```{r, echo=FALSE}
+
+nba$Agec = nba$Age-mean(nba$Age)
+nba$Agec2 = nba$Agec^2
+
+nba$Seasonc = nba$Season-mean(nba$Season)
+nba$GPc = nba$GP-mean(nba$GP)
+nba$GSc = nba$GS-mean(nba$GS)
+
+nba$PERc = nba$PER-mean(nba$PER)
+nba$TSc = nba$TS.-mean(nba$TS.)
+nba$FTrc = nba$FTr-mean(nba$FTr)
+nba$TRBc = nba$TRB.-mean(nba$TRB.)
+nba$ASTc = nba$AST.-mean(nba$AST.)
+nba$STLc = nba$STL.-mean(nba$STL.)
+nba$BLKc = nba$BLK.-mean(nba$BLK.)
+nba$TOVc = nba$TOV.-mean(nba$TOV.)
+nba$USGc = nba$USG.-mean(nba$USG.)
+nba$WSc = nba$WS-mean(nba$WS)
+nba$WS48c = nba$WS.48-mean(nba$WS.48)
+nba$BPMc = nba$BPM-mean(nba$BPM)
+nba$VORPc = nba$VORP-mean(nba$VORP)
+
+
+nba$RPGc = nba$RPG-mean(nba$RPG)
+nba$APGc = nba$APG-mean(nba$APG)
+nba$SPGc = nba$SPG-mean(nba$SPG)
+nba$BPGc = nba$BPG-mean(nba$BPG)
+nba$TPGc = nba$TPG-mean(nba$TPG)
+nba$PPGc = nba$PPG-mean(nba$PPG)
+nba$PFPGc = nba$PFPG-mean(nba$PFPG)
+nba$FGPGc = nba$FGPG-mean(nba$FGPG)
+nba$FGAPGc = nba$FGAPG-mean(nba$FGAPG)
+nba$X3PPGc = nba$X3PPG-mean(nba$X3PPG)
+nba$X3PAPGc = nba$X3PAPG-mean(nba$X3PAPG)
+nba$X2PPGc = nba$X2PPG-mean(nba$X2PPG)
+nba$X2PAPGc = nba$X2PAPG-mean(nba$X2PAPG)
+nba$FTPGc = nba$FTPG-mean(nba$FTPG)
+nba$FTAPGc = nba$FTAPG-mean(nba$FTAPG)
+
+```
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+# modelreg1 <- lm(X..of.Cap~ Pos+Agec+Agec2+Team+GP+Seasonc+GPc+GSc+RPGc+APGc+SPGc+BPGc+TPGc+PPGc+PFPGc+FGPGc+
+#                  FGAPG+X3PPGc+X3PAPGc+X2PPGc+X2PAPGc+FTPGc+Pos*Seasonc+X3PLevel ,data=nba)
+# summary(modelreg1)
+
+modelreg <- lm(logcap~ Pos+Agec+Agec2+Seasonc+GPc+GSc+RPGc+APGc+SPGc+BPGc+TPGc+PPGc+PFPGc+FGPGc+
+                 FGAPG+X3PPGc+X3PAPGc+X2PPGc+X2PAPGc+FTPGc+Pos*Seasonc+X3PLevel ,data=nba)
+summary(modelreg)
+
+```
+
+```{r, echo=FALSE,include=FALSE}
+
+modeladv <- lm(logcap~ Pos+Seasonc+Agec+Agec2+Team+PERc+TSc+FTrc+TRBc+ASTc+STLc+BLKc+TOVc+USGc
+               +WSc+WS48c+BPMc+VORPc+Pos*Seasonc,data=nba)
+summary(modeladv)
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+n <- nrow(nba)
+
+null_model <- lm(logcap~Pos+Agec+Agec2,data=nba)
+
+modelaic1 <- step(null_model,scope=formula(modelreg),direction="both",
+      trace=0)
+modelbic1 <- step(null_model,scope=formula(modelreg),direction="both",
+     trace=0,k = log(n))
+
+summary(modelaic1)
+summary(modelbic1)
+```
+
+## Model
+
+#### Model Selection, Assessment snd Comparision (Regular Statistic and Advanced Statistics)
+Before fitting the model, I center all numerical predictors to help interpret the final model. 
+For regular statistics and advanced statistics, I use BIC stepwise model selection to choose predictors. For both BIC selection, I only put position and age(including quadratic term) in the null model and put all other data in the full model. 
+The model for regular statistics is :
+
+$logcap = \beta_0 + \alpha Pos + \beta Agec + \gamma Agec2 + \delta PPGc + \epsilon RPGc + \zeta APGc \\ + \eta BPGc + \theta Seasonc + \iota GPc + \lambda FGAPG + \mu X2PPGc + \varepsilon$
+
+The model for advanced statistics is:
+
+$logcap =\beta_0 + \alpha Pos + \beta Agec + \gamma Agec2 + \delta WSc + \eta USGc + \theta BPMc + \lambda WS48c \\+ \mu VORPc + \nu Seasonc + \iota STLc + \sigma PERc + \tau TSc + \omega TOVc + \sigma TRBc + \varepsilon$
+
+Then I checked the four assumptions: linearity, independence of errors, equal variance, and normality. For both residual plots, the residuals seem to spread randomly along the x-axis with no pattern. For both residuals vs. fitted plots, residuals seem to spread randomly along the x-axis with no clear pattern. For both Q-Q plots, some of the observations lie away from the 45-degree line. My models slightly validate the normality assumption.
+I also check the multicollinearity for both models. Most of the VIF values are below 5 and only several between 10 to 15, which is acceptable.
+Then I implement k-fold cross-validation to calculate the RMSE for these two models. The regular statistics have slightly lower RMSE values, which indicates the regular statistics fit the data better than the advanced statistics.
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+modelbic1_ <- lm(formula = logcap ~ Pos + Agec + Agec2 + PPGc + RPGc + APGc + 
+    BPGc + Seasonc + GPc + FGAPG + X2PPGc+ X3PLevel, data = nba)
+
+anova(modelbic1,modelbic1_)
+
+
+
+```
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+
+modelaic2 <- step(null_model,scope=formula(modeladv),direction="both",
+      trace=0)
+modelbic2 <- step(null_model,scope=formula(modeladv),direction="both",
+     trace=0,k = log(n))
+
+summary(modelaic2)
+summary(modelbic2)
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+plot(modelbic1)
+plot(modelbic1,which=4,col=c("blue4")) 
+
+plot(modelbic2)
+plot(modelbic2,which=4,col=c("blue4")) 
+# 
+# ggplot(nba,aes(x=logcap, y=modelbic2$residual)) +
+# geom_point(alpha = .7) + geom_hline(yintercept=0,col="red3") + theme_classic() +
+# labs(title="Residuals vs Retail Price",x="Retail Price",y="Residuals")
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+library(rms)
+vif(modelbic1)
+vif(modelbic2)
+
+confint(modelbic1)
+confint(modelbic2)
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+library(Metrics)
+
+
+# 
+# # calculating rmse
+nba$regbic = predict(modelbic1)
+# 
+mse <- mean((nba$regbic-nba$logcap)^2)
+rmse <- sqrt(mse)
+
+rmse
+```
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+set.seed(365) 
+nba1 <- nba[sample(nrow(nba)),]
+K <- 10
+# Define a matrix to save your results into
+RMSE <- matrix(0,nrow=K,ncol=1)
+# Split the row indexes into k equal parts
+kth_fold <- cut(seq(1,nrow(nba1)),breaks=K,labels=FALSE)
+# Now write the for loop for the k-fold cross validation
+for(k in 1:K){
+# Split your data into the training and test datasets
+test_index <- which(kth_fold==k)
+train <- nba1[-test_index,]
+test <- nba1[test_index,]
+kth_model <- lm(modelbic2, data=train)
+y_test_pred<- predict(kth_model, test)
+
+# Now that you've split the data, 
+RMSE[k,] <- sqrt(mean((test$logcap - y_test_pred)^2)) # write your code for computing RMSE for each k here
+# You should consider using your code for question 7 above
+}
+
+mean(RMSE)
+ #Calculate the average of all values in the RSME matrix here.
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+set.seed(365) 
+nba1 <- nba[sample(nrow(nba)),]
+K <- 10
+# Define a matrix to save your results into
+RMSE <- matrix(0,nrow=K,ncol=1)
+# Split the row indexes into k equal parts
+kth_fold <- cut(seq(1,nrow(nba1)),breaks=K,labels=FALSE)
+# Now write the for loop for the k-fold cross validation
+for(k in 1:K){
+# Split your data into the training and test datasets
+test_index <- which(kth_fold==k)
+train <- nba1[-test_index,]
+test <- nba1[test_index,]
+kth_model <- lm(modelbic1, data=train)
+y_test_pred<- predict(kth_model, test)
+
+# Now that you've split the data, 
+RMSE[k,] <- sqrt(mean((test$logcap - y_test_pred)^2)) # write your code for computing RMSE for each k here
+# You should consider using your code for question 7 above
+}
+
+mean(RMSE)
+ #Calculate the average of all values in the RSME matrix here.
+
+
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+summary(nba)
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+nba$Seasonf = as.factor(nba$Season)
+
+modelall <- lm(logcap ~ Pos + Agec + Agec2 + WSc + USGc + BPMc + 
+    WS48c + VORPc + Seasonc + STLc + Team + TSc + TOVc + PERc + 
+    TRBc + ASTc + BLKc + PPGc + RPGc + APGc + 
+    BPGc + GPc + FGAPG + PFPGc + X2PPGc + X3PAPGc + 
+    FGPGc + Pos:Seasonc ,data=nba)
+
+
+modelbic3 <- step(null_model,scope=formula(modelall),direction="both",
+     trace=0,k = log(n))
+summary(modelbic3)
+```
+
+```{r, echo=FALSE,include=FALSE}
+
+plot(modelbic3)
+plot(modelbic3,which=4,col=c("blue4")) 
+
+vif(modelbic3)
+```
+
+
+```{r,echo=FALSE,include=FALSE}
+kable(confint(modelbic3))
+
+```
+
+```{r, echo=FALSE,include=FALSE}
+
+
+set.seed(365) 
+nba1 <- nba[sample(nrow(nba)),]
+K <- 10
+# Define a matrix to save your results into
+RMSE <- matrix(0,nrow=K,ncol=1)
+# Split the row indexes into k equal parts
+kth_fold <- cut(seq(1,nrow(nba1)),breaks=K,labels=FALSE)
+# Now write the for loop for the k-fold cross validation
+for(k in 1:K){
+# Split your data into the training and test datasets
+test_index <- which(kth_fold==k)
+train <- nba1[-test_index,]
+test <- nba1[test_index,]
+kth_model <- lm(modelbic3, data=train)
+y_test_pred<- predict(kth_model, test)
+
+# Now that you've split the data, 
+RMSE[k,] <- sqrt(mean((test$logcap - y_test_pred)^2)) # write your code for computing RMSE for each k here
+# You should consider using your code for question 7 above
+}
+
+mean(RMSE)
+ #Calculate the average of all values in the RSME matrix here.
+
+
+
+
+
+```
+
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+# modelfinal1 <- lm(logcap ~ Pos + Agec + Agec2 + PPGc + RPGc + APGc + 
+#     BPGc + Seasonc + ASTc + TRBc + GPc + TOVc + USGc + WS48c + 
+#     TSc + VORPc + BPMc + STLc +X3PLevel, data = nba)
+# summary(modelfinal1)
+# 
+
+
+```
+
+
+#### Final Model Selection and Assessment:
+Then I put all the statistics: regular and advanced in the full model, and use the same BIC stepwise method to fit the final model. I also set season as a factor variable and use it as the group variable to quantify how three-point shooters get paid in different seasons. The final model:
+
+$logcap_{ij} =\beta_{0j} + \beta_{ij} X_{ij} +  \varepsilon_{ij}\\$
+$\beta_{0j} = \gamma_{00} + \gamma_{01}(X3PLevel|Seasonf)_{j}  +\upsilon_{0j}\\$
+$\beta_{1j} = \gamma_{10} + \upsilon_{1j}\\$
+
+The assessment of the assumption is the same process as mentioned above. The final model slightly violates the normality assumption. Then I use the same cross-validation to calculate the RMSE and find out the RMSE value is almost the same as the model with regular statistics. It means pure regular statistics capture the features pretty well. It makes sense to me since most advanced statistics come from the regular data we have in the model.  
+
+
+#### Final model Interpretation
+
+```{r,echo=FALSE, out.width="65%", out.height="90%"}
+
+knitr::include_graphics("/Users/guanlxy/Desktop/image.jpg")
+```
+##### Fixed Effects
+The intercept is 1.69, which means for a 27-year-old average point guard in season 2007-2008, who played 58 games, scored 9.4 points, 4 rebounds, 2 assist per game will earn e^1.69 = 5.4 percentage of the total salary cap. 
+Holding all variables constant, a point guard gets the same statistics; he will get paid 8.2% higher than a point guard; a small forward will get paid 11.1% higher than a point guard; a power forward will get 24.6% higher, and a center will get 41.8% higher salary than a point a guard. As position goes from 1 to 5, players' salaries get higher.
+Holding all variables constant, for every one point a player score per game, his salary will increase by 4.1%; for every one more assist a player gets per game, he will get paid 24.5% higher; for every one more rebound a player gets per game, he will get paid 12.7% higher; for every one more block a player gets per game, he will get paid 12.3% higher.
+For every game a player plays, the 95% confidence interval is between 0.14% and 0.33%. For every one-unit increase in usage percentage, the player's salary will increase at best 3.9%, at worst 2.1%. For every one-unit increase in win share per 48 minutes, the player's salary will increase at best 1373.6%, at worst 8136.9%. Win share per 48 minutes is a powerful predictor for several reasons: first, the scale of WS48 is relatively small. The mean of WS48 is only 0.09, and the maximum is only 0.35. Thus a one-unit increase will influence the salary significantly. For every one-unit increase in turnover percentage, the player's salary will increase at best 3.9%, at worst 2.6%. It makes sense because superstars who handle the ball on the court tend to have a high turnover rate.
+
+##### Random Effects:
+For any player in season 1996-1997, the baseline salary is actually lower than the overall season's average; the effect of three-point shooting is also lower than the overall season's average. 
+For any player in season 2016-2017, the baseline salary is actually higher than the overall season's average; the effect of three point shooting is also higher than the overall season's average.
+The estimated standard error is 0.73, which describes the unexplained within-season variation. The estimated standard deviation of intercept is 0.09, which describes the within-season variation attributed to the random intercept. The estimated standard deviation of three-point shooting is 0.05, which describes the within-season variation attributed to the random slope(the predictor). The estimated random correlation is -0.40, which is low.  
+Then I draw the dot-plot of random effects to find the potential outliers. As shown in the plot, season 2000-2001, 2004-2005, 1996-1997, 2016-2017 are the potential outliers since they are far away from other seasons. We can also find out for seasons after 2005; the dots tend to lie on the right side of 0, while the dots representing seasons before 2005 tend to lie on the left of 0, indicating three-point shooting is valued more after 2005.
+
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+
+
+modelRE <- lmer(formula = logcap ~ Pos + Agec + Agec2 + PPGc + RPGc + APGc + 
+    BPGc + Seasonc + ASTc + TRBc + GPc + TOVc + USGc + WS48c + 
+    TSc + VORPc + BPMc + STLc + (X3PLevel|Seasonf), data = nba)
+
+
+summary(modelRE)
+
+
+
+```
+
+
+
+```{r, echo=FALSE,include=FALSE}
+
+(ranef(modelRE)$Seasonf)["1995",]
+(ranef(modelRE)$Seasonf)["1996",]
+(ranef(modelRE)$Seasonf)["1997",]
+(ranef(modelRE)$Seasonf)["1998",]
+(ranef(modelRE)$Seasonf)["1999",]
+(ranef(modelRE)$Seasonf)["2001",]
+(ranef(modelRE)$Seasonf)["2002",]
+(ranef(modelRE)$Seasonf)["2003",]
+(ranef(modelRE)$Seasonf)["2004",]
+(ranef(modelRE)$Seasonf)["2005",]
+(ranef(modelRE)$Seasonf)["2006",]
+(ranef(modelRE)$Seasonf)["2007",]
+(ranef(modelRE)$Seasonf)["2008",]
+(ranef(modelRE)$Seasonf)["2009",]
+(ranef(modelRE)$Seasonf)["2010",]
+(ranef(modelRE)$Seasonf)["2011",]
+(ranef(modelRE)$Seasonf)["2012",]
+(ranef(modelRE)$Seasonf)["2013",]
+(ranef(modelRE)$Seasonf)["2014",]
+(ranef(modelRE)$Seasonf)["2015",]
+(ranef(modelRE)$Seasonf)["2016",]
+(ranef(modelRE)$Seasonf)["2017",]
+
+
+
+
+
+```
+
+
+
+
+```{r, echo=FALSE,fig.width=8,fig.height=4}
+
+
+dotplot(ranef(modelRE,condVar=TRUE))$Seasonf
+
+
+```
+
+## Conclusion
+As obvious as it seems, players who score more points and make more field goals will be paid a higher salary, which is why the regular statistics produce a better model than the advanced model. Even the regular statistics and advanced statistics fit the data set well; the regular data is slightly better at predicting NBA players' salaries. In this analysis, the association between three-point shooting and salary was explored. The final model confirmed that the salary of a three-point shooter varies by season. Before 2005, three-point shooters did not get paid more than the non-three-point shooters; such circumstances changed after 2005. As the position goes from 1 to 5, the position does matter; players' salaries get higher significantly. 
+
+There are several potential limitations to this analysis. First, as mentioned in the data processing part, around 2% of the rows had null values. I do not have any information about these values to make further speculation or to conduct further processing. Hence, these observations were dropped before modeling. The missing observations could cause bias in my analysis. Moreover, my analysis is based on over 20 years period. In recent years, with the introduction of data science to sports, managers have based their salary offers to players much more on advanced statistics than in years past. Lastly, the NBA salary rules changed significantly during my analysis period, and my analysis did not reflect that.
+
+
+
